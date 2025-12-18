@@ -1,6 +1,9 @@
 
 from torchinfo import summary
 import torch.nn as nn
+import torch
+import torch.nn.functional as F
+
 
 
 class ModelFullyconnected(nn.Module):
@@ -193,4 +196,64 @@ class ModelConvNet3(nn.Module):
         y = self.fc2(x)
         # print('Output y.shape = ' + str(y.shape))
 
+        return y
+
+class ModelBetterCNN(nn.Module):
+    def __init__(self):
+        super(ModelBetterCNN, self).__init__()
+
+        # ----------- BLOCO CONVOLUCIONAL 1 -----------
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.bn1   = nn.BatchNorm2d(32)
+
+        # ----------- BLOCO CONVOLUCIONAL 2 -----------
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn2   = nn.BatchNorm2d(64)
+
+        # ----------- BLOCO CONVOLUCIONAL 3 -----------
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.bn3   = nn.BatchNorm2d(128)
+
+        # 🔹 Camada extra (moderada)
+        self.conv4 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        self.bn4   = nn.BatchNorm2d(128)
+
+        self.pool = nn.MaxPool2d(2, 2)
+
+        # Dropout
+        self.dropout_conv = nn.Dropout2d(p=0.25)
+        self.dropout_fc   = nn.Dropout(p=0.5)
+
+        # Fully connected
+        self.fc1 = nn.Linear(128 * 3 * 3, 128)
+        self.fc2 = nn.Linear(128, 10)
+
+        print('Model initialized with',
+              sum(p.numel() for p in self.parameters() if p.requires_grad),
+              'parameters')
+        summary(self, input_size=(1, 1, 28, 28))
+
+    def forward(self, x):
+        # Bloco 1
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
+
+        # Bloco 2
+        x = self.pool(F.relu(self.bn2(self.conv2(x))))
+
+        # Bloco 3
+        x = self.pool(F.relu(self.bn3(self.conv3(x))))
+        x = self.dropout_conv(x)
+
+        # Bloco 4 (extra conv sem pooling)
+        x = F.relu(self.bn4(self.conv4(x)))
+        x = self.dropout_conv(x)
+
+        # Flatten
+        x = x.view(x.size(0), -1)
+
+        # Fully connected
+        x = F.relu(self.fc1(x))
+        x = self.dropout_fc(x)
+
+        y = self.fc2(x)  # logits para CrossEntropyLoss
         return y

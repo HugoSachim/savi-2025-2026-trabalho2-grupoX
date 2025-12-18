@@ -15,8 +15,12 @@ import torch.nn as nn
 import json
 from tqdm import tqdm
 import wandb
-
-
+from PIL import Image, ImageDraw, ImageFont
+import tkinter as tk
+from tkinter import scrolledtext
+import os
+import platform
+import subprocess
 
 class Trainer():
 
@@ -36,7 +40,7 @@ class Trainer():
         # For testing we typically set shuffle to false
 
         # Setup loss function
-        self.loss = nn.MSELoss()  # Mean Squared Error Loss
+        self.loss = nn.CrossEntropyLoss()
 
         # Define optimizer
         self.optimizer = torch.optim.Adam(params=self.model.parameters(),
@@ -63,76 +67,56 @@ class Trainer():
         # -----------------------------------------
         # Iterate all epochs
         # -----------------------------------------
-        for i in range(self.epoch_idx, self.args['num_epochs'] + 1):  # number of epochs
+        for i in range(self.epoch_idx, self.args['num_epochs'] + 1):
 
             self.epoch_idx = i
             print('\nEpoch index = ' + str(self.epoch_idx))
+
             # -----------------------------------------
-            # Train - Iterate over batches
+            # Train
             # -----------------------------------------
-            self.model.train()  # set model to training mode
+            self.model.train()
             train_batch_losses = []
             num_batches = len(self.train_dataloader)
+
             for batch_idx, (image_tensor, label_gt_tensor) in tqdm(
-                    enumerate(self.train_dataloader), total=num_batches):  # type: ignore
+                    enumerate(self.train_dataloader), total=num_batches):
 
-                # print('\nBatch index = ' + str(batch_idx))
-                # print('image_tensor shape: ' + str(image_tensor.shape))
-                # print('label_gt_tensor shape: ' + str(label_gt_tensor.shape))
+                # Forward
+                label_pred_tensor = self.model(image_tensor)
 
-                # Compute the predicted labels
-                label_pred_tensor = self.model.forward(image_tensor)
-
-                # Compute the probabilities using softmax
-                label_pred_probabilities_tensor = torch.softmax(label_pred_tensor, dim=1)
-
-                # Compute the loss using MSE
-                batch_loss = self.loss(label_pred_probabilities_tensor, label_gt_tensor)
+                # Cross-Entropy Loss (NO softmax)
+                batch_loss = self.loss(label_pred_tensor, label_gt_tensor)
                 train_batch_losses.append(batch_loss.item())
-                # print('batch_loss: ' + str(batch_loss.item()))
 
-                # Update model
-                self.optimizer.zero_grad()  # resets the gradients from previous batches
-                batch_loss.backward()  # the actual backpropagation
+                # Backprop
+                self.optimizer.zero_grad()
+                batch_loss.backward()
                 self.optimizer.step()
 
             # -----------------------------------------
-            # Test - Iterate over batches
+            # Test
             # -----------------------------------------
-            self.model.eval()  # set model to evaluation mode
-
+            self.model.eval()
             test_batch_losses = []
             num_batches = len(self.test_dataloader)
-            for batch_idx, (image_tensor, label_gt_tensor) in tqdm(
-                    enumerate(self.test_dataloader), total=num_batches):  # type: ignore
-                # print('\nBatch index = ' + str(batch_idx))
-                # print('image_tensor shape: ' + str(image_tensor.shape))
-                # print('label_gt_tensor shape: ' + str(label_gt_tensor.shape))
 
-                # Compute the predicted labels
-                label_pred_tensor = self.model.forward(image_tensor)
+            with torch.no_grad():
+                for batch_idx, (image_tensor, label_gt_tensor) in tqdm(
+                        enumerate(self.test_dataloader), total=num_batches):
 
-                # Compute the probabilities using softmax
-                label_pred_probabilities_tensor = torch.softmax(label_pred_tensor, dim=1)
-
-                # Compute the loss using MSE
-                batch_loss = self.loss(label_pred_probabilities_tensor, label_gt_tensor)
-                test_batch_losses.append(batch_loss.item())
-                # print('batch_loss: ' + str(batch_loss.item()))
-
-                # During test there is no model update
+                    label_pred_tensor = self.model(image_tensor)
+                    batch_loss = self.loss(label_pred_tensor, label_gt_tensor)
+                    test_batch_losses.append(batch_loss.item())
 
             # ---------------------------------
-            # End of the epoch training
+            # End of epoch
             # ---------------------------------
             print('Finished epoch ' + str(i) + ' out of ' + str(self.args['num_epochs']))
-            # print('batch_losses: ' + str(batch_losses))
 
-            # update the training epoch losses
             train_epoch_loss = np.mean(train_batch_losses)
             self.train_epoch_losses.append(train_epoch_loss)
 
-            # update the testing epoch losses
             test_epoch_loss = np.mean(test_batch_losses)
             self.test_epoch_losses.append(test_epoch_loss)
 
@@ -143,11 +127,7 @@ class Trainer():
             })
 
             self.log_epoch_metrics(self.epoch_idx)
-
-            # Draw the updated training figure
             self.draw()
-
-            # Save the training state
             self.saveTrain()
 
         print('Training completed.')
@@ -232,19 +212,22 @@ class Trainer():
             plt.plot([best_epoch_idx, best_epoch_idx], [0, 0.5], 'g--', linewidth=1)
 
         plt.legend(['Train', 'Test', 'Best'], loc='upper right')
-        plt.savefig(os.path.join(self.args['experiment_full_name'], 'training.png'))
- 
+
+        # caminho do ficheiro
+        img_path = os.path.join(self.args['experiment_full_name'], 'training.png')
+        plt.savefig(img_path)
+
+        # abrir o ficheiro da imagem automaticamente
+        self.open_file(img_path)
+
 
     def evaluate(self):
 
         # -----------------------------------------
-        # Iterate over test batches and compute the ground trutch and predicted  values for all examples
+        # Iterate over test batches and compute the ground truth and predicted values for all examples
         # -----------------------------------------
         self.model.eval()  # set model to evaluation mode
         num_batches = len(self.test_dataloader)
-
-        self.gts = []  # list of ground truth labels
-        self.preds = []  # list of predicted labels
 
         gt_classes = []
         predicted_classes = []
@@ -256,7 +239,7 @@ class Trainer():
             batch_gt_classes = label_gt_tensor.argmax(dim=1).tolist()
 
             # Prediction
-            logits = self.model.forward(image_tensor)
+            logits = self.model(image_tensor)
 
             # Compute the probabilities using softmax
             probs = torch.softmax(logits, dim=1)
@@ -277,7 +260,6 @@ class Trainer():
         # -----------------------------------------
         plt.figure(2)
         class_names = [str(i) for i in range(10)]
-        title_conf_matrix = 'Confusion Matrix'
         seaborn.heatmap(confusion_matrix,
                         annot=True,
                         fmt='d',
@@ -286,18 +268,26 @@ class Trainer():
                         xticklabels=class_names,
                         yticklabels=class_names)
 
-        plt.title(title_conf_matrix, fontsize=16)
+        plt.title('Confusion Matrix', fontsize=16)
         plt.xlabel('Predicted classes', fontsize=14)
         plt.ylabel('True classes', fontsize=14)
-        plt.xticks(rotation=0, ha='right', fontsize=12)  # Rodar rótulos do X para melhor leitura
+        plt.xticks(rotation=0, ha='right', fontsize=12)
         plt.yticks(rotation=0, fontsize=12)
         plt.tight_layout()
-        plt.savefig(os.path.join(self.args['experiment_full_name'], 'confusion_matrix.png'))
+
+        img_path_matrix = os.path.join(self.args['experiment_full_name'], 'confusion_matrix.png')
+        plt.savefig(img_path_matrix)
+
+        # abrir o ficheiro da imagem automaticamente
+        self.open_file(img_path_matrix)
+
 
         # -----------------------------------------
         # Compute statistics per class
         # -----------------------------------------
         statistics = {}
+        per_class_precisions = []
+        per_class_recalls = []
         per_class_f1 = []
 
         total_TP = 0
@@ -322,19 +312,19 @@ class Trainer():
                 "f1_score": f1
             }
 
-            # For global metrics
-            if precision is not None and recall is not None:
-                per_class_f1.append(f1)
+            # For macro metrics
+            per_class_precisions.append(precision if precision is not None else 0)
+            per_class_recalls.append(recall if recall is not None else 0)
+            per_class_f1.append(f1 if f1 is not None else 0)
 
+            # For global (micro) metrics
             total_TP += TP
             total_FP += FP
             total_FN += FN
 
         # -----------------------------------------
-        # Global metrics
+        # Global (micro) metrics
         # -----------------------------------------
-
-        # Macro = média simples das classes
         global_precision = total_TP / (total_TP + total_FP) if (total_TP + total_FP) > 0 else None
         global_recall = total_TP / (total_TP + total_FN) if (total_TP + total_FN) > 0 else None
         global_f1 = self.getF1(global_precision, global_recall)
@@ -345,7 +335,21 @@ class Trainer():
             "f1_score": global_f1
         }
 
-        print("Global metrics:", statistics["global"])
+        # -----------------------------------------
+        # Macro metrics (média simples das classes)
+        # -----------------------------------------
+        macro_precision = sum(per_class_precisions) / len(per_class_precisions)
+        macro_recall = sum(per_class_recalls) / len(per_class_recalls)
+        macro_f1 = sum(per_class_f1) / len(per_class_f1)
+
+        statistics["macro"] = {
+            "precision": macro_precision,
+            "recall": macro_recall,
+            "f1_score": macro_f1
+        }
+
+        print("Global metrics (micro):", statistics["global"])
+        print("Macro metrics:", statistics["macro"])
 
         # -----------------------------------------
         # Save JSON
@@ -354,8 +358,12 @@ class Trainer():
         with open(json_filename, 'w') as f:
             json.dump(statistics, f, indent=4)
 
+        # --- depois de salvar o JSON ---
+        json_imag_path = self.save_metrics_text(json_filename)
+        self.open_file(json_imag_path)
+
         wandb.log({
-            "final_confusion_matrix": wandb.Image(os.path.join(self.args['experiment_full_name'], 'confusion_matrix.png'))
+            "final_confusion_matrix": wandb.Image(img_path_matrix)
         })
 
 
@@ -418,3 +426,53 @@ class Trainer():
         })
 
         plt.close()
+
+    def save_metrics_text(self, json_file, output_path=None):
+        # -----------------------------------------
+        # Ler métricas do JSON
+        # -----------------------------------------
+        with open(json_file, 'r') as f:
+            saved_stats = json.load(f)
+
+        # -----------------------------------------
+        # Construir o texto
+        # -----------------------------------------
+        display_text = ""
+        for key in saved_stats:
+            if key in ["global", "macro"]:
+                display_text += f"{key.upper()} metrics:\n"
+                display_text += f"  Precision: {saved_stats[key]['precision']:.4f}\n"
+                display_text += f"  Recall   : {saved_stats[key]['recall']:.4f}\n"
+                display_text += f"  F1-score : {saved_stats[key]['f1_score']:.4f}\n\n"
+            else:
+                display_text += f"Classe {saved_stats[key]['digit']}:\n"
+                display_text += f"  TP: {saved_stats[key]['TP']}, FP: {saved_stats[key]['FP']}, FN: {saved_stats[key]['FN']}\n"
+                display_text += f"  Precision: {saved_stats[key]['precision']:.4f}\n"
+                display_text += f"  Recall   : {saved_stats[key]['recall']:.4f}\n"
+                display_text += f"  F1-score : {saved_stats[key]['f1_score']:.4f}\n\n"
+
+        # -----------------------------------------
+        # Caminho para salvar o ficheiro de texto
+        # -----------------------------------------
+        if output_path is None:
+            output_path = os.path.join(os.path.dirname(json_file), "metrics_summary.txt")
+
+        with open(output_path, 'w') as f:
+            f.write(display_text)
+
+        print(f"Métricas salvas em ficheiro de texto: {output_path}")
+
+        return output_path
+
+
+    def open_file(self, path):
+        try:
+            system_name = platform.system()
+            if system_name == "Windows":
+                os.startfile(path)  # abre com programa padrão
+            elif system_name == "Darwin":  # macOS
+                subprocess.call(["open", path])
+            else:  # Linux e outros
+                subprocess.call(["xdg-open", path])
+        except Exception as e:
+            print("Não foi possível abrir a imagem:", e)
