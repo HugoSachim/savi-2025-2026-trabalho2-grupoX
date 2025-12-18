@@ -71,7 +71,7 @@ def main():
     parser.add_argument('-i', '--image_path', type=str, default='/home/hogu/Desktop/savi-2025-2026-trabalho2-grupoX/Tarefa_2/data_versao_D/mnist_detection/test/images/56.png')
     parser.add_argument('-t', '--threshold', type=float, default=0.99)
     parser.add_argument('-s', '--stride', type=int, default=2) 
-    parser.add_argument('-v', '--visualize', action='store_true', help='Ativar visualização em tempo real')
+    parser.add_argument('-vs', '--visualize', action='store_true', help='Ativar visualização em tempo real')
     args = parser.parse_args()
 
     gts = get_ground_truth_list(args.image_path)
